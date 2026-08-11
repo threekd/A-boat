@@ -1,7 +1,7 @@
 import os
 from openai import OpenAI
 from dotenv import load_dotenv
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 # 加载 .env 文件中的环境变量
 load_dotenv()
@@ -11,7 +11,7 @@ class HelloAgentsLLM:
     为本书 "Hello Agents" 定制的LLM客户端。
     它用于调用任何兼容OpenAI接口的服务，并默认使用流式响应。
     """
-    def __init__(self, model: str = None, apiKey: str = None, baseUrl: str = None, timeout: int = None):
+    def __init__(self, model: Optional[str] = None, apiKey: Optional[str] = None, baseUrl: Optional[str] = None, timeout: Optional[int] = None):
         """
         初始化客户端。优先使用传入参数，如果未提供，则从环境变量加载。
         """
@@ -23,7 +23,7 @@ class HelloAgentsLLM:
         if not all([self.model, apiKey, baseUrl]):
             raise ValueError("模型ID、API密钥和服务地址必须被提供或在.env文件中定义。")
 
-        self.client = OpenAI(api_key=apiKey, base_url=baseUrl, timeout=timeout)
+        self._client = OpenAI(api_key=apiKey, base_url=baseUrl, timeout=timeout)
 
     def think(self, messages: List[Dict[str, str]], temperature: float = 0) -> str:
         """
@@ -31,7 +31,7 @@ class HelloAgentsLLM:
         """
         print(f"🧠 正在调用 {self.model} 模型...")
         try:
-            response = self.client.chat.completions.create(
+            response = self._client.chat.completions.create(
                 model=self.model,
                 messages=messages,
                 temperature=temperature,

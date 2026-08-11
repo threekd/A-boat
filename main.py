@@ -1,6 +1,19 @@
-def main():
-    print("Hello from a-boat!")
+# my_main.py
+from dotenv import load_dotenv
+from core.llm import MyLLM # 注意:这里导入我们自己的类
 
+# 加载环境变量
+load_dotenv()
 
-if __name__ == "__main__":
-    main()
+# 实例化我们重写的客户端，并指定provider
+llm = MyLLM(provider="deepseek") 
+
+# 准备消息
+messages = [{"role": "user", "content": "你好，请介绍一下你自己。"}]
+
+# 发起调用，think() 内部会流式打印，并返回完整文本
+response = llm.think(messages)
+
+# 打印返回的完整响应
+print("\n--- 完整响应 ---")
+print(response)
