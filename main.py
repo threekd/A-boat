@@ -1,55 +1,53 @@
-# test_simple_agent.py
+# test_advanced_search.py
 from dotenv import load_dotenv
-from hello_agents import HelloAgentsLLM, ToolRegistry
-from hello_agents.tools import CalculatorTool
-from agents.my_simple_agent import MySimpleAgent
+from tools.builtin.search import create_advanced_search_registry, MyAdvancedSearchTool
 
 # 加载环境变量
 load_dotenv()
 
-# 创建LLM实例
-llm = HelloAgentsLLM(model="deepseek-v4-flash")
+def test_advanced_search():
+    """测试高级搜索工具"""
 
-# 测试1:基础对话Agent（无工具）
-print("=== 测试1:基础对话 ===")
-basic_agent = MySimpleAgent(
-    name="基础助手",
-    llm=llm,
-    system_prompt="你是一个友好的AI助手，请用简洁明了的方式回答问题。"
-)
+    # 创建包含高级搜索工具的注册表
+    registry = create_advanced_search_registry()
 
-response1 = basic_agent.run("你好，请介绍一下自己")
-print(f"基础对话响应: {response1}\n")
+    print("🔍 测试高级搜索工具\n")
 
-# 测试2:带工具的Agent
-print("=== 测试2:工具增强对话 ===")
-tool_registry = ToolRegistry()
-calculator = CalculatorTool()
-tool_registry.register_tool(calculator)
+    # 测试查询
+    test_queries = [
+        "Python编程语言的历史",
+        "人工智能的最新发展",
+        "2024年科技趋势"
+    ]
 
-enhanced_agent = MySimpleAgent(
-    name="增强助手",
-    llm=llm,
-    system_prompt="你是一个智能助手，可以使用工具来帮助用户。",
-    tool_registry=tool_registry,
-    enable_tool_calling=True
-)
+    for i, query in enumerate(test_queries, 1):
+        print(f"测试 {i}: {query}")
+        result = registry.execute_tool("advanced_search", query)
+        print(f"结果: {result}\n")
+        print("-" * 60 + "\n")
 
-response2 = enhanced_agent.run("请帮我计算 15 * 8 + 32")
-print(f"工具增强响应: {response2}\n")
+def test_api_configuration():
+    """测试API配置检查"""
+    print("🔧 测试API配置检查:")
 
-# 测试3:流式响应
-print("=== 测试3:流式响应 ===")
-print("流式响应: ", end="")
-for chunk in basic_agent.stream_run("请解释什么是人工智能"):
-    pass  # 内容已在stream_run中实时打印
+    # 直接创建搜索工具实例
+    search_tool = MyAdvancedSearchTool()
 
-# 测试4:动态添加工具
-print("\n=== 测试4:动态工具管理 ===")
-print(f"添加工具前: {basic_agent.has_tools()}")
-basic_agent.add_tool(calculator)
-print(f"添加工具后: {basic_agent.has_tools()}")
-print(f"可用工具: {basic_agent.list_tools()}")
+    # 如果没有配置API，会显示配置提示
+    result = search_tool.search("机器学习算法")
+    print(f"搜索结果: {result}")
 
-# 查看对话历史
-print(f"\n对话历史: {len(basic_agent.get_history())} 条消息")
+def test_with_agent():
+    """测试与Agent的集成"""
+    print("\n🤖 与Agent集成测试:")
+    print("高级搜索工具已准备就绪，可以与Agent集成使用")
+
+    # 显示工具描述
+    registry = create_advanced_search_registry()
+    tools_desc = registry.get_tools_description()
+    print(f"工具描述:\n{tools_desc}")
+
+if __name__ == "__main__":
+    test_advanced_search()
+    test_api_configuration()
+    test_with_agent()
