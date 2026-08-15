@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "dotenv>=0.9.9",
-    "hello-agents[search]==0.1.1",
-    "openai>=2.53.0",
+    "hello-agents[all,search]==0.2.9",
+    "openai>=1.0.0,<2.0.0",
+    "spacy>=3.8.15",
 ]

@@ -1,53 +1,29 @@
-# test_advanced_search.py
-from dotenv import load_dotenv
-from tools.builtin.search import create_advanced_search_registry, MyAdvancedSearchTool
+# 配置好同级文件夹下.env中的大模型API
+from hello_agents import SimpleAgent, HelloAgentsLLM, ToolRegistry
+from hello_agents.tools import MemoryTool, RAGTool
 
-# 加载环境变量
-load_dotenv()
+# 创建LLM实例
+llm = HelloAgentsLLM()
 
-def test_advanced_search():
-    """测试高级搜索工具"""
+# 创建工具注册表
+tool_registry = ToolRegistry()
 
-    # 创建包含高级搜索工具的注册表
-    registry = create_advanced_search_registry()
+# 添加记忆工具
+memory_tool = MemoryTool(user_id="user123")
+tool_registry.register_tool(memory_tool)
 
-    print("🔍 测试高级搜索工具\n")
+# 添加RAG工具
+rag_tool = RAGTool(knowledge_base_path="./knowledge_base")
+tool_registry.register_tool(rag_tool)
 
-    # 测试查询
-    test_queries = [
-        "Python编程语言的历史",
-        "人工智能的最新发展",
-        "2024年科技趋势"
-    ]
+# 创建Agent并配置工具
+agent = SimpleAgent(
+    name="智能助手",
+    llm=llm,
+    system_prompt="你是一个有记忆和知识检索能力的AI助手",
+    tool_registry=tool_registry
+)
 
-    for i, query in enumerate(test_queries, 1):
-        print(f"测试 {i}: {query}")
-        result = registry.execute_tool("advanced_search", query)
-        print(f"结果: {result}\n")
-        print("-" * 60 + "\n")
-
-def test_api_configuration():
-    """测试API配置检查"""
-    print("🔧 测试API配置检查:")
-
-    # 直接创建搜索工具实例
-    search_tool = MyAdvancedSearchTool()
-
-    # 如果没有配置API，会显示配置提示
-    result = search_tool.search("机器学习算法")
-    print(f"搜索结果: {result}")
-
-def test_with_agent():
-    """测试与Agent的集成"""
-    print("\n🤖 与Agent集成测试:")
-    print("高级搜索工具已准备就绪，可以与Agent集成使用")
-
-    # 显示工具描述
-    registry = create_advanced_search_registry()
-    tools_desc = registry.get_tools_description()
-    print(f"工具描述:\n{tools_desc}")
-
-if __name__ == "__main__":
-    test_advanced_search()
-    test_api_configuration()
-    test_with_agent()
+# 开始对话
+response = agent.run("你好！请记住我叫张三，我是一名Python开发者")
+print(response)
