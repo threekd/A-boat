@@ -6,7 +6,9 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "dotenv>=0.9.9",
+    "fastapi>=0.112,<0.113",  # gradio 4.x 需要旧版 TemplateResponse 签名；0.115+ 会触发 pydantic.v1 慢导入并破坏 gradio 4.44
     "hello-agents[all,search]==0.2.9",
+    "markitdown[pdf]>=0.1.7",  # hello-agents 的 RAG PDF 解析需要 pdfplumber（[pdf] extra），否则 PdfConverter 抛 MissingDependencyException
     "openai>=1.0.0,<2.0.0",
     "spacy>=3.8.15",
 ]

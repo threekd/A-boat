@@ -1,3 +1,12 @@
+# 应用 hello_agents RAG 补丁（修复 embedding batch_size 超限与向量归一化 bug）
+import os
+import sys
+
+# 确保项目根目录在 sys.path 中，使 `patches` 包可被导入（main.py 位于项目根目录）
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import patches.hello_agents_rag_patch  # noqa: F401
+
 from hello_agents import SimpleAgent, HelloAgentsLLM, ToolRegistry
 from hello_agents.tools import RAGTool
 
