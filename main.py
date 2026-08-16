@@ -1,174 +1,140 @@
+"""
+多Agent协作的智能文档助手
+
+使用两个SimpleAgent分工协作：
+- Agent1：GitHub搜索专家
+- Agent2：文档生成专家
+"""
 from hello_agents import SimpleAgent, HelloAgentsLLM
-from hello_agents.context import ContextBuilder, ContextConfig, ContextPacket
-from hello_agents.tools import MemoryTool, RAGTool, NoteTool
-from datetime import datetime
+from hello_agents.tools import MCPTool, SearchTool
+from dotenv import load_dotenv
 
-class ProjectAssistant(SimpleAgent):
-    """长期项目助手,集成 NoteTool 和 ContextBuilder"""
+# 加载.env文件中的环境变量
+load_dotenv(dotenv_path="../HelloAgents/.env")
 
-    def __init__(self, name: str, project_name: str, **kwargs):
-        super().__init__(name=name, llm=HelloAgentsLLM(), **kwargs)
+print("="*70)
+print("多Agent协作的智能文档助手")
+print("="*70)
 
-        self.project_name = project_name
+# ============================================================
+# Agent 1: GitHub搜索专家
+# ============================================================
+print("\n【步骤1】创建GitHub搜索专家...")
 
-        # 初始化工具
-        self.memory_tool = MemoryTool(user_id=project_name)
-        self.rag_tool = RAGTool(knowledge_base_path=f"./{project_name}_kb")
-        self.note_tool = NoteTool(workspace=f"./{project_name}_notes")
+github_searcher = SimpleAgent(
+    name="GitHub搜索专家",
+    llm=HelloAgentsLLM(),
+    system_prompt="""你是一个GitHub搜索专家。
+你的任务是搜索GitHub仓库并返回结果。
+请返回清晰、结构化的搜索结果，包括：
+- 仓库名称
+- 简短描述
 
-        # 初始化上下文构建器
-        self.context_builder = ContextBuilder(
-            memory_tool=self.memory_tool,
-            rag_tool=self.rag_tool,
-            config=ContextConfig(max_tokens=4000)
-        )
-
-        self.conversation_history = []
-
-    def run(self, user_input: str, note_as_action: bool = False) -> str:
-        """运行助手,自动集成笔记"""
-
-        # 1. 从 NoteTool 检索相关笔记
-        relevant_notes = self._retrieve_relevant_notes(user_input)
-
-        # 2. 将笔记转换为 ContextPacket
-        note_packets = self._notes_to_packets(relevant_notes)
-
-        # 3. 构建优化的上下文
-        context = self.context_builder.build(
-            user_query=user_input,
-            conversation_history=self.conversation_history,
-            system_instructions=self._build_system_instructions(),
-            custom_packets=note_packets
-        )
-
-        # 4. 调用 LLM
-        response = self.llm.invoke(context)
-
-        # 5. 如果需要,将交互记录为笔记
-        if note_as_action:
-            self._save_as_note(user_input, response)
-
-        # 6. 更新对话历史
-        self._update_history(user_input, response)
-
-        return response
-
-    def _retrieve_relevant_notes(self, query: str, limit: int = 3) -> List[Dict]:
-        """检索相关笔记"""
-        try:
-            # 优先检索 blocker 和 action 类型的笔记
-            blockers = self.note_tool.run({
-                "action": "list",
-                "note_type": "blocker",
-                "limit": 2
-            })
-
-            # 通用搜索
-            search_results = self.note_tool.run({
-                "action": "search",
-                "query": query,
-                "limit": limit
-            })
-
-            # 合并并去重
-            all_notes = {note['note_id']: note for note in blockers + search_results}
-            return list(all_notes.values())[:limit]
-
-        except Exception as e:
-            print(f"[WARNING] 笔记检索失败: {e}")
-            return []
-
-    def _notes_to_packets(self, notes: List[Dict]) -> List[ContextPacket]:
-        """将笔记转换为上下文包"""
-        packets = []
-
-        for note in notes:
-            content = f"[笔记:{note['title']}]\n{note['content']}"
-
-            packets.append(ContextPacket(
-                content=content,
-                timestamp=datetime.fromisoformat(note['updated_at']),
-                token_count=len(content) // 4,  # 简单估算
-                relevance_score=0.75,  # 笔记具有较高相关性
-                metadata={
-                    "type": "note",
-                    "note_type": note['type'],
-                    "note_id": note['note_id']
-                }
-            ))
-
-        return packets
-
-    def _save_as_note(self, user_input: str, response: str):
-        """将交互保存为笔记"""
-        try:
-            # 判断应该保存为什么类型的笔记
-            if "问题" in user_input or "阻塞" in user_input:
-                note_type = "blocker"
-            elif "计划" in user_input or "下一步" in user_input:
-                note_type = "action"
-            else:
-                note_type = "conclusion"
-
-            self.note_tool.run({
-                "action": "create",
-                "title": f"{user_input[:30]}...",
-                "content": f"## 问题\n{user_input}\n\n## 分析\n{response}",
-                "note_type": note_type,
-                "tags": [self.project_name, "auto_generated"]
-            })
-
-        except Exception as e:
-            print(f"[WARNING] 保存笔记失败: {e}")
-
-    def _build_system_instructions(self) -> str:
-        """构建系统指令"""
-        return f"""你是 {self.project_name} 项目的长期助手。
-
-你的职责:
-1. 基于历史笔记提供连贯的建议
-2. 追踪项目进展和待解决问题
-3. 在回答时引用相关的历史笔记
-4. 提供具体、可操作的下一步建议
-
-注意:
-- 优先关注标记为 blocker 的问题
-- 在建议中说明依据来源(笔记、记忆或知识库)
-- 保持对项目整体进度的认识"""
-
-    def _update_history(self, user_input: str, response: str):
-        """更新对话历史"""
-        from hello_agents.core.message import Message
-
-        self.conversation_history.append(
-            Message(content=user_input, role="user", timestamp=datetime.now())
-        )
-        self.conversation_history.append(
-            Message(content=response, role="assistant", timestamp=datetime.now())
-        )
-
-        # 限制历史长度
-        if len(self.conversation_history) > 10:
-            self.conversation_history = self.conversation_history[-10:]
-
-# 使用示例
-assistant = ProjectAssistant(
-    name="项目助手",
-    project_name="data_pipeline_refactoring"
+保持简洁，不要添加额外的解释。"""
 )
 
-# 第一次交互:记录项目状态
-response = assistant.run(
-    "我们已经完成了数据模型层的重构,测试覆盖率达到85%。下一步计划重构业务逻辑层。",
-    note_as_action=True
+# 添加可用的网络搜索工具（GitHub MCP 服务器在当前环境中不可用）
+search_tool = SearchTool(backend="hybrid")
+github_searcher.add_tool(search_tool)
+
+# ============================================================
+# Agent 2: 文档生成专家
+# ============================================================
+print("\n【步骤2】创建文档生成专家...")
+
+document_writer = SimpleAgent(
+    name="文档生成专家",
+    llm=HelloAgentsLLM(),
+    system_prompt="""你是一个文档生成专家。
+你的任务是根据提供的信息生成结构化的Markdown报告。
+
+报告应该包括：
+- 标题
+- 简介
+- 主要内容（分点列出，包括项目名称、描述等）
+- 总结
+
+请直接输出完整的Markdown格式报告内容，不要使用工具保存。"""
 )
 
-# 第二次交互:提出问题
-response = assistant.run(
-    "在重构业务逻辑层时,我遇到了依赖版本冲突的问题,该如何解决?"
+# 添加文件系统工具
+fs_tool = MCPTool(
+    name="fs",
+    server_command=["npx", "-y", "@modelcontextprotocol/server-filesystem", "."]
 )
+document_writer.add_tool(fs_tool)
 
-# 查看笔记摘要
-summary = assistant.note_tool.run({"action": "summary"})
-print(summary)
+# ============================================================
+# 执行任务
+# ============================================================
+print("\n" + "="*70)
+print("开始执行任务...")
+print("="*70)
+
+try:
+    # 步骤1：GitHub搜索
+    print("\n【步骤3】Agent1 搜索GitHub...")
+    search_task = "搜索关于'AI agent'的GitHub仓库，返回前5个最相关的结果"
+
+    try:
+        search_results = github_searcher.run(search_task)
+        if "无法直接搜索GitHub仓库" in search_results or "未找到工具" in search_results:
+            raise RuntimeError("Agent search fallback triggered")
+    except Exception:
+        print("⚠️ Agent 未能调用搜索工具，改为直接调用可用搜索后端...")
+        search_results = search_tool.run({
+            "input": "AI agent GitHub repositories",
+            "max_results": 5,
+            "mode": "text",
+        })
+
+    print("\n搜索结果:")
+    print("-" * 70)
+    print(search_results)
+    print("-" * 70)
+    
+    # 步骤2：生成报告
+    print("\n【步骤4】Agent2 生成报告...")
+    report_task = f"""
+根据以下GitHub搜索结果，生成一份Markdown格式的研究报告：
+
+{search_results}
+
+报告要求：
+1. 标题：# AI Agent框架研究报告
+2. 简介：说明这是关于AI Agent的GitHub项目调研
+3. 主要发现：列出找到的项目及其特点（包括名称、描述等）
+4. 总结：总结这些项目的共同特点
+
+请直接输出完整的Markdown格式报告。
+"""
+
+    report_content = document_writer.run(report_task)
+
+    print("\n报告内容:")
+    print("=" * 70)
+    print(report_content)
+    print("=" * 70)
+
+    # 步骤3：保存报告
+    print("\n【步骤5】保存报告到文件...")
+    import os
+    try:
+        with open("report.md", "w", encoding="utf-8") as f:
+            f.write(report_content)
+        print("✅ 报告已保存到 report.md")
+
+        # 验证文件
+        file_size = os.path.getsize("report.md")
+        print(f"✅ 文件大小: {file_size} 字节")
+    except Exception as e:
+        print(f"❌ 保存失败: {e}")
+    
+    print("\n" + "="*70)
+    print("任务完成！")
+    print("="*70)
+    
+except Exception as e:
+    print(f"\n❌ 错误: {e}")
+    import traceback
+    traceback.print_exc()
