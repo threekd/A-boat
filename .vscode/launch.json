@@ -1,0 +1,16 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: 当前文件 (可进入模块)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            // 关闭 Just My Code，允许 F11 单步进入 site-packages / 模块内的函数
+            "justMyCode": false,
+            // 需要调试 .venv 里的代码时：
+            // "python": "${workspaceFolder}/.venv/Scripts/python.exe"
+        }
+    ]
+}

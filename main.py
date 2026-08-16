@@ -1,72 +1,174 @@
-# 应用 hello_agents RAG 补丁（修复 embedding batch_size 超限与向量归一化 bug）
-import os
-import sys
+from hello_agents import SimpleAgent, HelloAgentsLLM
+from hello_agents.context import ContextBuilder, ContextConfig, ContextPacket
+from hello_agents.tools import MemoryTool, RAGTool, NoteTool
+from datetime import datetime
 
-# 确保项目根目录在 sys.path 中，使 `patches` 包可被导入（main.py 位于项目根目录）
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+class ProjectAssistant(SimpleAgent):
+    """长期项目助手,集成 NoteTool 和 ContextBuilder"""
 
-import patches.hello_agents_rag_patch  # noqa: F401
+    def __init__(self, name: str, project_name: str, **kwargs):
+        super().__init__(name=name, llm=HelloAgentsLLM(), **kwargs)
 
-from hello_agents import SimpleAgent, HelloAgentsLLM, ToolRegistry
-from hello_agents.tools import RAGTool
+        self.project_name = project_name
 
-# 创建LLM实例
-llm = HelloAgentsLLM()
+        # 初始化工具
+        self.memory_tool = MemoryTool(user_id=project_name)
+        self.rag_tool = RAGTool(knowledge_base_path=f"./{project_name}_kb")
+        self.note_tool = NoteTool(workspace=f"./{project_name}_notes")
 
-# 创建RAG工具
-rag_tool = RAGTool(
-    knowledge_base_path="./knowledge_base",
-    collection_name="test_collection",
-    rag_namespace="test"
+        # 初始化上下文构建器
+        self.context_builder = ContextBuilder(
+            memory_tool=self.memory_tool,
+            rag_tool=self.rag_tool,
+            config=ContextConfig(max_tokens=4000)
+        )
+
+        self.conversation_history = []
+
+    def run(self, user_input: str, note_as_action: bool = False) -> str:
+        """运行助手,自动集成笔记"""
+
+        # 1. 从 NoteTool 检索相关笔记
+        relevant_notes = self._retrieve_relevant_notes(user_input)
+
+        # 2. 将笔记转换为 ContextPacket
+        note_packets = self._notes_to_packets(relevant_notes)
+
+        # 3. 构建优化的上下文
+        context = self.context_builder.build(
+            user_query=user_input,
+            conversation_history=self.conversation_history,
+            system_instructions=self._build_system_instructions(),
+            custom_packets=note_packets
+        )
+
+        # 4. 调用 LLM
+        response = self.llm.invoke(context)
+
+        # 5. 如果需要,将交互记录为笔记
+        if note_as_action:
+            self._save_as_note(user_input, response)
+
+        # 6. 更新对话历史
+        self._update_history(user_input, response)
+
+        return response
+
+    def _retrieve_relevant_notes(self, query: str, limit: int = 3) -> List[Dict]:
+        """检索相关笔记"""
+        try:
+            # 优先检索 blocker 和 action 类型的笔记
+            blockers = self.note_tool.run({
+                "action": "list",
+                "note_type": "blocker",
+                "limit": 2
+            })
+
+            # 通用搜索
+            search_results = self.note_tool.run({
+                "action": "search",
+                "query": query,
+                "limit": limit
+            })
+
+            # 合并并去重
+            all_notes = {note['note_id']: note for note in blockers + search_results}
+            return list(all_notes.values())[:limit]
+
+        except Exception as e:
+            print(f"[WARNING] 笔记检索失败: {e}")
+            return []
+
+    def _notes_to_packets(self, notes: List[Dict]) -> List[ContextPacket]:
+        """将笔记转换为上下文包"""
+        packets = []
+
+        for note in notes:
+            content = f"[笔记:{note['title']}]\n{note['content']}"
+
+            packets.append(ContextPacket(
+                content=content,
+                timestamp=datetime.fromisoformat(note['updated_at']),
+                token_count=len(content) // 4,  # 简单估算
+                relevance_score=0.75,  # 笔记具有较高相关性
+                metadata={
+                    "type": "note",
+                    "note_type": note['type'],
+                    "note_id": note['note_id']
+                }
+            ))
+
+        return packets
+
+    def _save_as_note(self, user_input: str, response: str):
+        """将交互保存为笔记"""
+        try:
+            # 判断应该保存为什么类型的笔记
+            if "问题" in user_input or "阻塞" in user_input:
+                note_type = "blocker"
+            elif "计划" in user_input or "下一步" in user_input:
+                note_type = "action"
+            else:
+                note_type = "conclusion"
+
+            self.note_tool.run({
+                "action": "create",
+                "title": f"{user_input[:30]}...",
+                "content": f"## 问题\n{user_input}\n\n## 分析\n{response}",
+                "note_type": note_type,
+                "tags": [self.project_name, "auto_generated"]
+            })
+
+        except Exception as e:
+            print(f"[WARNING] 保存笔记失败: {e}")
+
+    def _build_system_instructions(self) -> str:
+        """构建系统指令"""
+        return f"""你是 {self.project_name} 项目的长期助手。
+
+你的职责:
+1. 基于历史笔记提供连贯的建议
+2. 追踪项目进展和待解决问题
+3. 在回答时引用相关的历史笔记
+4. 提供具体、可操作的下一步建议
+
+注意:
+- 优先关注标记为 blocker 的问题
+- 在建议中说明依据来源(笔记、记忆或知识库)
+- 保持对项目整体进度的认识"""
+
+    def _update_history(self, user_input: str, response: str):
+        """更新对话历史"""
+        from hello_agents.core.message import Message
+
+        self.conversation_history.append(
+            Message(content=user_input, role="user", timestamp=datetime.now())
+        )
+        self.conversation_history.append(
+            Message(content=response, role="assistant", timestamp=datetime.now())
+        )
+
+        # 限制历史长度
+        if len(self.conversation_history) > 10:
+            self.conversation_history = self.conversation_history[-10:]
+
+# 使用示例
+assistant = ProjectAssistant(
+    name="项目助手",
+    project_name="data_pipeline_refactoring"
 )
 
-tool_registry = ToolRegistry()
-tool_registry.register_tool(rag_tool)
+# 第一次交互:记录项目状态
+response = assistant.run(
+    "我们已经完成了数据模型层的重构,测试覆盖率达到85%。下一步计划重构业务逻辑层。",
+    note_as_action=True
+)
 
-# 创建具有RAG能力的Agent
-agent = SimpleAgent(name="知识助手", llm=llm, tool_registry=tool_registry)
+# 第二次交互:提出问题
+response = assistant.run(
+    "在重构业务逻辑层时,我遇到了依赖版本冲突的问题,该如何解决?"
+)
 
-# 体验RAG功能
-# 添加第一个知识
-result1 = rag_tool.run({
-    "action": "add_text",
-    "text": "Python是一种高级编程语言，由Guido van Rossum于1991年首次发布。Python的设计哲学强调代码的可读性和简洁的语法。",
-    "document_id": "python_intro",
-    "namespace": "test",
-})
-print(f"知识1: {result1}")
-
-# 添加第二个知识
-result2 = rag_tool.run({
-    "action": "add_text",
-    "text": "机器学习是人工智能的一个分支，通过算法让计算机从数据中学习模式。主要包括监督学习、无监督学习和强化学习三种类型。",
-    "document_id": "ml_basics",
-    "namespace": "test",
-})
-print(f"知识2: {result2}")
-
-# 添加第三个知识
-result3 = rag_tool.run({
-    "action": "add_text",
-    "text": "RAG（检索增强生成）是一种结合信息检索和文本生成的AI技术。它通过检索相关知识来增强大语言模型的生成能力。",
-    "document_id": "rag_concept",
-    "namespace": "test",
-})
-print(f"知识3: {result3}")
-
-print("\n=== 搜索知识 ===")
-result = rag_tool.run({
-    "action": "search",
-    "query": "Python编程语言的历史",
-    "limit": 3,
-    "min_score": 0.1,
-    "namespace": "test",
-})
-print(result)
-
-print("\n=== 知识库统计 ===")
-result = rag_tool.run({
-    "action": "stats",
-    "namespace": "test",
-})
-print(result)
+# 查看笔记摘要
+summary = assistant.note_tool.run({"action": "summary"})
+print(summary)
